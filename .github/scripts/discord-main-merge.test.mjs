@@ -1,19 +1,98 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildMessages, collectIssueIds, notifyMainMerge, webhookAddress } from './discord-main-merge.mjs';
+import { buildMessages, collectIssueIds, notifyMainMerge, webhookAddress, promoteIssues } from './discord-main-merge.mjs';
 
 const repo = 'HectorRussia/beastscribe';
 const sha = (n) => n.toString(16).padStart(40, '0');
-const webhook = 'https://discord.com/api/webhooks/123/secret-token';
+const webhook = 'https://discord.com/api/webhooks/123/secret-token?thread_id=456';
 const json = (data, status = 200) => new Response(JSON.stringify(data), { status });
+
+function promotionFixture(names, { missingProd = false, failId } = {}) {
+  const issues = names.map((name, index) => ({ ...issue(`BOO-${index + 1}`), state: { id: name, name } }));
+  const writes = [];
+  const fetchImpl = async (_url, options) => {
+    const { operationName, variables } = JSON.parse(options.body);
+    if (operationName === 'ProdState') return json({ data: { organization: { urlKey: 'foro' }, workflowStates: { nodes: missingProd ? [] : [{ id: 'prod', name: 'Prod', team: { id: 'team-boo', key: 'BOO' } }] } } });
+    const current = issues.find((entry) => entry.id === (variables.issueId ?? variables.id));
+    if (operationName === 'NotificationIssue') return json({ data: { organization: { urlKey: 'foro' }, issue: current } });
+    assert.equal(operationName, 'UpdateIssueStatus');
+    if (current.id === failId) return json({ data: { issueUpdate: { success: false } } });
+    writes.push(current.id);
+    current.state = { id: 'prod', name: 'Prod' };
+    return json({ data: { issueUpdate: { success: true, issue: current } } });
+  };
+  return { issues, writes, fetchImpl };
+}
+
+test('only QA is promoted; all manual states and already Prod are preserved', async () => {
+  const f = promotionFixture(['QA', 'Prod', 'reject', 'In Progress', 'In Review', 'your_task', 'Done', 'Canceled']);
+  const results = await promoteIssues(f.issues, 'key', f.fetchImpl);
+  assert.deepEqual(f.writes, ['BOO-1']);
+  assert.deepEqual(results.map((entry) => entry.promotion), ['promoted', 'already-prod', ...Array(6).fill('skipped')]);
+  const text = buildMessages(pr('dev'), results, repo)[0].embeds[0].description;
+  assert.match(text, /QA → Prod: 1 งาน/);
+  assert.match(text, /อยู่ Prod แล้ว/);
+  assert.match(text, /ไม่ได้ย้าย \(reject\)/);
+});
+
+test('missing Prod or wrong team prevents all writes', async () => {
+  const missing = promotionFixture(['QA'], { missingProd: true });
+  await assert.rejects(promoteIssues(missing.issues, 'key', missing.fetchImpl), /exactly one Prod/);
+  assert.equal(missing.writes.length, 0);
+  const wrong = promotionFixture(['QA', 'QA']);
+  wrong.issues[1].team = { id: 'other', key: 'BOO' };
+  await assert.rejects(promoteIssues(wrong.issues, 'key', wrong.fetchImpl), /mismatched/);
+  assert.equal(wrong.writes.length, 0);
+});
+
+test('partial failure is recoverable without rewriting already Prod issues', async () => {
+  const f = promotionFixture(['QA', 'QA'], { failId: 'BOO-2' });
+  await assert.rejects(promoteIssues(f.issues, 'key', f.fetchImpl), /did not confirm/);
+  assert.deepEqual(f.writes, ['BOO-1']);
+  const retry = promotionFixture(f.issues.map((entry) => entry.state.name));
+  const results = await promoteIssues(retry.issues, 'key', retry.fetchImpl);
+  assert.deepEqual(retry.writes, ['BOO-2']);
+  assert.deepEqual(results.map((entry) => entry.promotion), ['already-prod', 'promoted']);
+});
+
+test('archived QA is not promoted', async () => {
+  const f = promotionFixture(['QA']);
+  f.issues[0].archivedAt = '2026-09-30T00:00:00Z';
+  assert.equal((await promoteIssues(f.issues, 'key', f.fetchImpl))[0].promotion, 'skipped');
+  assert.equal(f.writes.length, 0);
+});
+
+test('forum thread is required before any API call or mutation', async () => {
+  const { args, calls } = fixture();
+  args.webhookUrl = 'https://discord.com/api/webhooks/123/secret-token';
+  await assert.rejects(notifyMainMerge(args), /requires thread_id/);
+  assert.equal(calls.length, 0);
+});
+
+test('unexpected Discord destination fails rather than reporting success', async () => {
+  const { args } = fixture({ response: (url) => url.startsWith(webhook) ? json({ id: '123', channel_id: '999' }) : undefined });
+  await assert.rejects(notifyMainMerge(args), /unexpected destination thread/);
+});
+
+test('promotion failure never sends a Discord success message', async () => {
+  const pull = pr('dev');
+  const { args, calls } = fixture({ pull, response: (url, options) => {
+    if (url.includes('/commits/')) return json({ sha: pull.merge_commit_sha, parents: [{ sha: sha(1000) }, { sha: sha(1001) }] });
+    if (url.includes('/compare/')) return json({ total_commits: 1, commits: [{ sha: sha(1) }] });
+    if (url.includes('/pulls?')) return json([{ merged_at: pull.merged_at, merge_commit_sha: sha(1), base: { ref: 'dev' }, head: { ref: 'boo-123', repo: { full_name: repo } } }]);
+    if (options.body && JSON.parse(options.body).operationName === 'UpdateIssueStatus') return json({ data: { issueUpdate: { success: false } } });
+  } });
+  await assert.rejects(notifyMainMerge(args), /did not confirm/);
+  assert.ok(calls.every((call) => !call.url.startsWith(webhook)));
+});
 function pr(head = 'user/boo-123-title') {
   return { number: 42, title: 'Release @everyone **test**', state: 'closed', merged: true,
     merged_at: '2026-09-30T13:24:00Z', merge_commit_sha: sha(999), merged_by: { login: 'maintainer' },
     head: { ref: head, repo: { full_name: repo } }, base: { ref: 'main', repo: { full_name: repo } } };
 }
 function issue(id = 'BOO-123') {
-  return { identifier: id, title: 'ชื่องาน [link](https://evil.test) @everyone',
-    url: `https://linear.app/foro/issue/${id}/task`, team: { key: 'BOO' }, assignee: null };
+  return { id, state: { id: 'qa', name: 'QA' }, identifier: id, title: 'ชื่องาน [link](https://evil.test) @everyone',
+    url: `https://linear.app/foro/issue/${id}/task`, team: { id: 'team-boo', key: 'BOO' }, assignee: null };
 }
 function fixture({ pull = pr(), data, response } = {}) {
   const calls = [];
@@ -29,13 +108,15 @@ function fixture({ pull = pr(), data, response } = {}) {
       }
       if (url.startsWith('https://api.github.com/')) return json(pull);
       if (url === 'https://api.linear.app/graphql') {
+        if (body.operationName === 'ProdState') return json({ data: { organization: { urlKey: 'foro' }, workflowStates: { nodes: [{ id: 'prod', name: 'Prod', team: { id: 'team-boo', key: 'BOO' } }] } } });
+        if (body.operationName === 'UpdateIssueStatus') return json({ data: { issueUpdate: { success: true, issue: { id: body.variables.id, state: { id: 'prod', name: 'Prod' } } } } });
         assert.equal(body.operationName, 'NotificationIssue');
         assert.doesNotMatch(body.query, /mutation|issueUpdate/);
         return json({ data: data ?? { organization: { urlKey: 'foro' }, issue: issue(body.variables.issueId) } });
       }
-      assert.equal(url, `${webhook}?wait=true`);
+      assert.equal(url, `${webhook}&wait=true`);
       assert.equal(options.headers.Authorization, undefined);
-      return json({ id: '123456' });
+      return json({ id: '123456', channel_id: '456' });
     } };
   return { args, calls, pull };
 }
@@ -120,7 +201,7 @@ test('dev release fully integrates collection, Linear lookup, and Discord notifi
       base: { ref: 'dev' }, head: { ref: 'boo-123-feature', repo: { full_name: repo } } }]);
   } });
   assert.equal((await notifyMainMerge(args)).outcome, 'sent');
-  assert.equal(calls.filter((call) => call.url === 'https://api.linear.app/graphql').length, 1);
+  assert.equal(calls.filter((call) => call.body?.operationName === 'UpdateIssueStatus').length, 1);
   assert.match(calls.at(-1).body.embeds[0].description, /1 งาน • dev → main/);
 });
 
@@ -226,13 +307,13 @@ test('partial Discord delivery reports confirmed messages and never hides the fa
     if (url.includes('/compare/')) return json({ total_commits: 10, commits: Array.from({ length: 10 }, (_, i) => ({ sha: sha(i + 1) })) });
     if (url.includes('/pulls?')) return json(Array.from({ length: 10 }, (_, i) => ({ merged_at: pull.merged_at,
       merge_commit_sha: sha(i + 1), base: { ref: 'dev' }, head: { ref: `boo-${i + 1}`, repo: { full_name: repo } } })));
-    if (url.includes('api.linear.app')) {
+    if (url.includes('api.linear.app') && JSON.parse(options.body).operationName === 'NotificationIssue') {
       const id = JSON.parse(options.body).variables.issueId;
       return json({ data: { organization: { urlKey: 'foro' }, issue: { ...issue(id), title: '*'.repeat(300) } } });
     }
     if (url.startsWith(webhook)) {
       posts++;
-      return posts === 1 ? json({ id: '123' }) : json({ error: webhook }, 500);
+      return posts === 1 ? json({ id: '123', channel_id: '456' }) : json({ error: webhook }, 500);
     }
   } });
   await assert.rejects(notifyMainMerge(args), (error) => {
