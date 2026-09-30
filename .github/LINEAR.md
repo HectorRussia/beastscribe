@@ -1,7 +1,7 @@
 # เชื่อม GitHub PR กับ Linear ทีม BOO
 
 Flow หลักคือ `feature → dev → main`: review และ QA ที่ `dev` แล้วแจ้ง Discord เมื่อ merge เข้า `main`
-workflow Discord ไม่เปลี่ยนสถานะ Linear และไม่ยืนยันว่า deploy สำเร็จ
+เมื่อ merge `dev → main` workflow ย้ายเฉพาะงาน `QA → Prod` ก่อนแจ้ง Discord; ไม่ยืนยันว่า deploy สำเร็จ
 
 Workflow `Linear status sync` ใช้กับ repository `HectorRussia/beastscribe`, workspace
 [`foro`](https://linear.app/foro/team/BOO/active) และทีม `BOO` โดยอ่านรหัสงานจากชื่อ
@@ -123,7 +123,7 @@ Tests ใช้ mock API ไม่มีการเรียก Linear จร�
 5. ลากกลับ `In Progress` แล้ว push เพิ่ม: งานต้องเข้า `In Review`
 6. Merge PR เข้า `dev`: งานต้องเข้า `QA`
 7. Rerun run เดิมที่เปิด PR: งานต้องยังอยู่ `QA`
-8. เปิด PR `dev → main` และใช้ **Create a merge commit**: Discord ต้องแจ้งงาน BOO และ Linear ยังอยู่ `QA`
+8. เปิด PR `dev → main` และใช้ **Create a merge commit**: Linear ต้องเปลี่ยน `QA → Prod` และ Discord ต้องแจ้งงาน BOO ใน thread ที่ตั้งไว้
 
 การทดสอบจริงต้องมี key และ issue ที่เข้าถึงได้ ผล tests แบบ mock ไม่ถือเป็นการยืนยันว่าเชื่อมต่อจริงแล้ว
 
@@ -146,7 +146,7 @@ Tests ใช้ mock API ไม่มีการเรียก Linear จร�
 
 Workflow **Discord main merge** ทำงานแยกจาก Linear sync เมื่อ PR ภายใน repo ถูก merge เข้า `main`
 สำเร็จเท่านั้น การปิดโดยไม่ merge, merge เข้า `dev`, direct push และ PR จาก fork ไม่ส่งข้อความ
-งานใน Linear คงสถานะเดิมทั้งหมด รวมถึง `QA` ไม่ถูกย้ายไป `Done`
+สำหรับ `dev → main` ย้ายเฉพาะ `QA → Prod` งานใน Prod อยู่แล้วไม่ถูกเขียนซ้ำ สถานะอื่นคงเดิม สำหรับ branch อื่นเข้า main จะแจ้งอย่างเดียว ไม่ย้ายสถานะ
 
 ### ตั้งค่า Discord
 
@@ -154,14 +154,14 @@ Workflow **Discord main merge** ทำงานแยกจาก Linear sync �
    สร้าง webhook และคัดลอก Webhook URL ต้องมีสิทธิ์จัดการ webhook ในช่องนั้น
 2. เพิ่ม repository Actions secret ชื่อ **`DISCORD_WEBHOOK_URL`** ที่
    [หน้า secrets](https://github.com/HectorRussia/beastscribe/settings/secrets/actions)
-   วาง URL เต็ม เช่นรูปแบบ `https://discord.com/api/webhooks/<id>/<token>`
+   วาง URL เต็ม เช่นรูปแบบ `https://discord.com/api/webhooks/<id>/<token>?thread_id=<id ของโพสต์ส่งงาน Done>`
    ไม่ส่ง URL จริงลงแชตหรือ commit ลง repo
 3. ใช้ repository secret **`LINEAR_HORN_PROD_BOOK`** เดิมเพื่ออ่านชื่อและผู้รับผิดชอบงานสำหรับข้อความ
    ไม่ต้องสร้าง Discord bot หรือ Discord bot token
 4. ติดตั้ง workflow และสคริปต์เข้า `dev` ก่อน ทดสอบ Linear ให้ผ่าน แล้วค่อยเปิด PR `dev → main` เมื่อพร้อมแจ้ง Discord
    คู่มือนี้ไม่ถือว่ามีการ push ไฟล์ สร้าง remote branch หรือตั้ง secrets ให้แล้ว
 
-สำหรับส่งเข้า thread สามารถใช้ webhook URL ที่มี `?thread_id=<เลข thread>` ได้
+การตั้งค่านี้ต้องมี `?thread_id=<เลข thread>` ใน webhook URL สคริปต์จะหยุดก่อนแก้ Linear ถ้าไม่มี
 รุ่นแรกไม่สร้าง thread ใหม่ใน forum channel อัตโนมัติ
 
 ### วิธีรวมงานแต่ละรอบ
@@ -186,7 +186,7 @@ Workflow **Discord main merge** ทำงานแยกจาก Linear sync �
 งานไม่มีผู้รับผิดชอบแสดง “ยังไม่ระบุ” ใช้ข้อมูลชื่อ/ผู้รับผิดชอบล่าสุดใน Linear ณ ตอนรัน
 
 ข้อความไม่แสดง “Deployment complete” หรือ “QA → Done” เพราะยังไม่มี deployment pipeline
-และ workflow นี้ไม่เปลี่ยนสถานะงาน รายการยาวจะแบ่งเป็นหลายข้อความพร้อมเลขหน้า
+ข้อความแสดงจำนวนงาน `QA → Prod` แยกจากงานที่อยู่ Prod แล้วและงานที่ไม่ได้ย้าย รายการยาวจะแบ่งเป็นหลายข้อความพร้อมเลขหน้า
 ไม่เรียก mentions และไม่ดึงภาพ avatar จากข้อมูลภายนอก
 
 ดูผลที่ GitHub Actions → **Discord main merge** → **Notify Discord** หรือ summary:
@@ -204,3 +204,11 @@ timeout อาจเกิดหลัง Discord รับข้อความ
 [GitHub Compare API](https://docs.github.com/en/rest/commits/commits#compare-two-commits)
 
 Linear ใช้ `pull_request` เพื่อทำงานบน `dev` ได้ก่อนติดตั้งใน `main` และรันเฉพาะ branch ภายใน repo ที่มี `boo-` ในชื่อ (ไม่สนตัวพิมพ์เล็กใหญ่) Job ติดตั้งที่ไม่มีรหัส BOO จะถูกข้าม สคริปต์ยังตรวจรหัสงานแบบสมบูรณ์อีกครั้ง PR ที่มี merge conflict ต้องแก้ conflict ก่อน GitHub จึงจะเรียก workflow นี้
+
+## การย้าย QA → Prod
+
+ต้องมีสถานะชื่อ `Prod` ตรงตัวในทีม BOO โดยสคริปต์ค้นหา UUID ให้เอง ตรวจงานและสถานะปลายทางทั้งหมดก่อนเขียน แล้วอ่านสถานะงานอีกครั้งก่อนแต่ละ update เพื่อรักษาการลากด้วยมือ (API ไม่มี atomic compare-and-set)
+
+ถ้า Linear ล้มเหลวกลางทาง จะไม่ส่ง Discord สำเร็จ งานก่อนหน้าอาจเป็น Prod แล้ว; rerun จะข้ามงานเหล่านั้น ถ้า Discord ล้มเหลวหลังเปลี่ยน Prod จะไม่ย้อน Linear กลับ QA ให้แก้สาเหตุแล้ว rerun ซึ่งอาจส่งข้อความซ้ำได้
+
+Actions summary แสดงรหัสงานที่ย้ายแล้ว จำนวนงานที่อยู่ Prod อยู่แล้ว/ที่คงเดิม พร้อม thread ID และ message IDs ที่ Discord ยืนยันโดยไม่เผย webhook token

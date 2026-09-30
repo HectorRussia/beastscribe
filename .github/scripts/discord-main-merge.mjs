@@ -1,16 +1,61 @@
 import { appendFile, readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { findIssueIds, linearRequest, requestJson, SyncError } from './linear-status-sync.mjs';
+import { findIssueIds, linearRequest, requestJson, SyncError, UPDATE_MUTATION } from './linear-status-sync.mjs';
 
 const SHA = /^[a-f0-9]{40,64}$/i;
 const ISSUE_QUERY = `query NotificationIssue($issueId: String!) {
   organization { urlKey }
   issue(id: $issueId) {
-    identifier title url team { key } assignee { name }
+    id identifier title url archivedAt state { id name } team { id key } assignee { name }
   }
 }`;
 const skip = (message) => ({ outcome: 'skipped', message });
+
+export async function promoteIssues(issues, linearApiKey, fetchImpl) {
+  if (!issues.length) return issues;
+  const data = await linearRequest(fetchImpl, linearApiKey, 'ProdState', `query ProdState {
+    organization { urlKey }
+    workflowStates(filter: { team: { key: { eq: "BOO" } }, name: { eq: "Prod" } }, first: 2) {
+      nodes { id name team { id key } }
+    }
+  }`, {});
+  const states = data.workflowStates?.nodes;
+  if (data.organization?.urlKey !== 'foro' || !Array.isArray(states) || states.length !== 1
+      || states[0]?.name !== 'Prod' || !states[0].id || states[0].team?.key !== 'BOO'
+      || !states[0].team?.id) throw new SyncError('Expected exactly one Prod status in the foro BOO team.');
+  const target = states[0];
+  // Validate the complete release before making the first write.
+  for (const issue of issues) {
+    if (!issue.id || !issue.state?.id || typeof issue.state.name !== 'string'
+        || issue.team?.id !== target.team.id) throw new SyncError('Incomplete or mismatched BOO issue state; promotion stopped.');
+  }
+  const results = [];
+  for (const issue of issues) {
+    // Re-read immediately before writing to respect manual status changes.
+    const latest = await linearRequest(fetchImpl, linearApiKey, 'NotificationIssue', ISSUE_QUERY, { issueId: issue.identifier });
+    const current = latest.issue;
+    if (latest.organization?.urlKey !== 'foro' || current?.id !== issue.id
+        || current.identifier !== issue.identifier || current.team?.id !== target.team.id
+        || current.team?.key !== 'BOO' || !current.state?.id || typeof current.state.name !== 'string') {
+      throw new SyncError('Linear issue changed or became inaccessible during promotion. Rerun after checking the issue.');
+    }
+    let promotion = current.state.name === 'Prod' ? 'already-prod' : 'skipped';
+    if (!current.archivedAt && current.state.name === 'QA') {
+      const updated = await linearRequest(fetchImpl, linearApiKey, 'UpdateIssueStatus', UPDATE_MUTATION,
+        { id: current.id, stateId: target.id });
+      const result = updated.issueUpdate;
+      if (result?.success !== true || result.issue?.id !== current.id
+          || result.issue?.state?.id !== target.id || result.issue?.state?.name !== 'Prod') {
+        throw new SyncError('Linear did not confirm QA -> Prod. Earlier issues may already be Prod; check and rerun.');
+      }
+      promotion = 'promoted';
+      console.log(`updated: ${current.identifier}: QA -> Prod.`);
+    }
+    results.push({ ...issue, promotion, previousState: current.state.name });
+  }
+  return results;
+}
 
 export function webhookAddress(value) {
   if (!value?.trim()) throw new SyncError('DISCORD_WEBHOOK_URL is missing. Add the repository Actions secret.');
@@ -91,10 +136,16 @@ function markdown(value, limit) {
 }
 
 export function buildMessages(pr, issues, repository) {
-  const heading = `${issues.length} งาน • ${markdown(pr.head.ref, 100)} → main`;
+  let heading = `${issues.length} งาน • ${markdown(pr.head.ref, 100)} → main`;
+  if (pr.head.ref === 'dev') {
+    heading += `\nQA → Prod: ${issues.filter((issue) => issue.promotion === 'promoted').length} งาน`;
+  }
   const lines = issues.map((issue) => {
     const link = issue.url.replace(/\(/g, '%28').replace(/\)/g, '%29');
-    return `• [${issue.identifier}](${link}) ${markdown(issue.title, 300)} — ${markdown(issue.assignee?.name || 'ยังไม่ระบุ', 100)}`;
+    const status = issue.promotion === 'promoted' ? ' · QA → Prod'
+      : issue.promotion === 'already-prod' ? ' · อยู่ Prod แล้ว'
+        : issue.promotion === 'skipped' ? ` · ไม่ได้ย้าย (${markdown(issue.previousState, 80)})` : '';
+    return `• [${issue.identifier}](${link}) ${markdown(issue.title, 300)} — ${markdown(issue.assignee?.name || 'ยังไม่ระบุ', 100)}${status}`;
   });
   if (!lines.length) lines.push('ไม่พบงาน BOO ที่เชื่อมกับ PR นี้');
   const descriptions = [];
@@ -140,6 +191,8 @@ export async function notifyMainMerge({ event, eventName, repository, githubToke
   if (!Number.isSafeInteger(number) || number <= 0) throw new SyncError('The event has no valid PR number.');
   if (!githubToken?.trim()) throw new SyncError('GITHUB_TOKEN is missing.');
   const webhook = webhookAddress(webhookUrl);
+  const threadId = new URL(webhook).searchParams.get('thread_id');
+  if (!threadId) throw new SyncError('DISCORD_WEBHOOK_URL requires thread_id for the configured forum post. No Linear update was attempted.');
   const get = (path) => requestJson(fetchImpl, `https://api.github.com/repos/${repository}${path}`, {
     headers: { Authorization: `Bearer ${githubToken}`, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' },
   }, 'GitHub');
@@ -171,21 +224,29 @@ export async function notifyMainMerge({ event, eventName, repository, githubToke
     }
     issues.push({ ...issue, url: `https://linear.app/foro/issue/${id}` });
   }
-  const messages = buildMessages(pr, issues, repository);
+  const releaseIssues = pr.head.ref === 'dev' ? await promoteIssues(issues, linearApiKey, fetchImpl) : issues;
+  const messages = buildMessages(pr, releaseIssues, repository);
   let sent = 0;
+  const deliveries = [];
   try {
     for (const payload of messages) {
       const response = await requestJson(fetchImpl, webhook, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
       }, 'Discord');
       if (typeof response?.id !== 'string' || !/^\d+$/.test(response.id)) throw new SyncError('Discord did not confirm a saved message.');
+      if (response.channel_id !== threadId) throw new SyncError('Discord returned an unexpected destination thread. Check the webhook configuration.');
+      deliveries.push({ messageId: response.id, threadId: response.channel_id });
       sent++;
     }
   } catch (error) {
     const detail = error instanceof SyncError ? error.message : 'Unexpected Discord response.';
     throw new SyncError(`${detail} Confirmed ${sent}/${messages.length} messages. A rerun may resend messages.`);
   }
-  return { outcome: 'sent', message: `PR #${number}: ${issues.length} BOO issues, ${sent} Discord messages. Linear statuses were unchanged.` };
+  const promoted = releaseIssues.filter((issue) => issue.promotion === 'promoted').map((issue) => issue.identifier);
+  const statusMessage = pr.head.ref === 'dev'
+    ? `QA -> Prod: ${promoted.join(', ') || 'none'}. Already Prod: ${releaseIssues.filter((issue) => issue.promotion === 'already-prod').length}; preserved: ${releaseIssues.filter((issue) => issue.promotion === 'skipped').length}.`
+    : 'Linear statuses were unchanged.';
+  return { outcome: 'sent', message: `PR #${number}: ${issues.length} BOO issues, ${sent} Discord messages. ${statusMessage} Discord thread: ${threadId}; message IDs: ${deliveries.map((delivery) => delivery.messageId).join(', ')}.`, deliveries };
 }
 
 export async function main(env = process.env) {
