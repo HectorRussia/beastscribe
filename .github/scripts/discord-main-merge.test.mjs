@@ -126,7 +126,7 @@ test('direct main merge sends a green embed with Thai time, links, and no mentio
   assert.equal((await notifyMainMerge(args)).outcome, 'sent');
   assert.equal(calls.length, 3);
   const message = calls.at(-1).body;
-  assert.equal(message.username, 'Deployment Bot');
+  assert.equal(message.username, 'Dragon_working');
   assert.deepEqual(message.allowed_mentions, { parse: [] });
   const embed = message.embeds[0];
   assert.equal(embed.color, 0x2ecc71);
