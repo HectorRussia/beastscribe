@@ -123,7 +123,7 @@ export async function syncLinearStatus({
   linearApiKey,
   fetchImpl = globalThis.fetch,
 }) {
-  if (eventName !== 'pull_request_target' || !ACTIONS.has(event?.action)) {
+  if (eventName !== 'pull_request' || !ACTIONS.has(event?.action)) {
     return skipped('This event is not supported by the Linear sync workflow.');
   }
   if (!/^[a-z0-9_.-]+\/[a-z0-9_.-]+$/i.test(repository ?? '')

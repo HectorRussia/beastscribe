@@ -1,7 +1,7 @@
 name: Linear status sync
 
 on:
-  pull_request_target:
+  pull_request:
     branches: [dev]
     types: [opened, reopened, ready_for_review, synchronize, edited, closed]
 
@@ -17,16 +17,16 @@ concurrency:
 
 jobs:
   sync:
-    if: github.event.pull_request.head.repo.full_name == github.repository
+    if: github.event.pull_request.head.repo.full_name == github.repository && contains(github.event.pull_request.head.ref, 'boo-')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      # Always load scripts from main, including for PRs targeting dev.
+      # Load reviewed scripts from dev; no main bootstrap is needed.
       # Never change this to the PR head, a merge ref, or PR-provided code.
       - name: Check out trusted workflow code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          ref: refs/heads/main
+          ref: refs/heads/dev
           persist-credentials: false
           sparse-checkout: .github/scripts
 

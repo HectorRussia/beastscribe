@@ -17,7 +17,7 @@ function issue(id = 'BOO-123') {
 }
 function fixture({ pull = pr(), data, response } = {}) {
   const calls = [];
-  const args = { eventName: 'pull_request_target', repository: repo, githubToken: 'github-secret',
+  const args = { eventName: 'pull_request', repository: repo, githubToken: 'github-secret',
     linearApiKey: 'linear-secret', webhookUrl: webhook,
     event: { action: 'closed', repository: { full_name: repo }, pull_request: structuredClone(pull) },
     fetchImpl: async (url, options) => {

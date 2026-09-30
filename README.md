@@ -11,7 +11,7 @@
 > เทคโนโลยีและ flow ในเอกสารเป็นแนวทางที่เลือกไว้ ไม่ใช่ฟีเจอร์ที่ implement หรือทดสอบแล้ว
 
 Flow การทำงาน: เปิด PR เข้า `dev` → `In Review`, merge เข้า `dev` → `QA`, แล้ว merge `dev → main` ด้วย merge commit → แจ้ง Discord โดยคงสถานะ Linear เดิม
-ดู [คู่มือ Linear และ Discord](.github/LINEAR.md) สำหรับตั้ง `LINEAR_HORN_PROD_BOOK`, `DISCORD_WEBHOOK_URL` และสร้าง `dev` หลังนำ workflow เข้า `main`
+ดู [คู่มือ Linear และ Discord](.github/LINEAR.md) สำหรับตั้ง `LINEAR_HORN_PROD_BOOK`, `DISCORD_WEBHOOK_URL` โดยติดตั้ง workflow เข้า `dev` ก่อน แล้วค่อยนำ `dev` เข้า `main` เมื่อพร้อม
 
 ## 1. แนวคิดของโปรเจกต์
 

@@ -128,7 +128,7 @@ export function buildMessages(pr, issues, repository) {
 }
 
 export async function notifyMainMerge({ event, eventName, repository, githubToken, linearApiKey, webhookUrl, fetchImpl = globalThis.fetch }) {
-  if (eventName !== 'pull_request_target' || event?.action !== 'closed'
+  if (eventName !== 'pull_request' || event?.action !== 'closed'
       || event.pull_request?.merged !== true || event.pull_request?.base?.ref !== 'main') {
     return skip('Only merged PRs targeting main send Discord notifications.');
   }

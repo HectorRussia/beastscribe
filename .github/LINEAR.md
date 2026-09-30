@@ -44,8 +44,8 @@ branch ที่คัดลอกด้วย **Copy git branch name** ใน L
    เพื่อไม่ให้ชนกับ workflow หรือข้าม `QA` ไป `Done` การเปลี่ยนกฎระดับทีมอาจกระทบ repo อื่นที่ทีมใช้
 5. ใน **Settings → Code & reviews** ปิดการย้าย issue ไปสถานะ Started เมื่อคัดลอกชื่อ branch
    เพื่อให้การย้ายเข้า `In Progress` เป็นการลากด้วยมือ สมาชิกแต่ละคนตรวจการตั้งค่าของตนเอง
-6. นำ workflow, สคริปต์ และ tests เข้า `main` แล้วตรวจว่า repo เปิดใช้ GitHub Actions
-   การเปลี่ยนใน PR ติดตั้งนี้ยังไม่ถูกใช้จนกว่าจะเข้า `main`; สร้าง `dev` จาก `main` ที่ติดตั้งแล้ว และเริ่มตรวจผลด้วย PR ถัดไป
+6. นำ workflow, สคริปต์ และ tests เข้า `dev` ก่อน แล้วตรวจว่า repo เปิดใช้ GitHub Actions
+   จากนั้นเปิด PR branch งาน BOO เข้า `dev` เพื่อทดสอบ Linear โดยยังไม่ต้อง merge เข้า `main`
 
 ไม่จำเป็นต้องติดตั้ง Linear GitHub integration เพื่อให้สคริปต์เปลี่ยนสถานะผ่าน API ได้
 หากต้องการให้ PR แสดงเป็น attachment ใน Linear สามารถใช้ integration สำหรับการเชื่อม PR
@@ -114,7 +114,7 @@ node --test .github/scripts/linear-status-sync.test.mjs .github/scripts/discord-
 Tests ใช้ mock API ไม่มีการเรียก Linear จริง ครอบคลุมชื่อ branch, PR lifecycle, สถานะที่ควบคุมเอง,
 การรันซ้ำ, event เก่า, การตรวจ workspace/team, HTTP/GraphQL errors และการไม่เปิดเผยข้อมูลจาก API ใน log
 
-หลังตั้ง secret และนำไฟล์เข้า `main` แล้ว ทดสอบจริงด้วยงาน BOO สำหรับทดสอบหนึ่งรายการ:
+หลังตั้ง secret และนำไฟล์เข้า `dev` แล้ว ทดสอบจริงด้วยงาน BOO สำหรับทดสอบหนึ่งรายการ:
 
 1. ลากงานไป `In Progress` คัดลอกชื่อ branch แล้วสร้าง branch ภายใน repo นี้
 2. เพิ่มการเปลี่ยนแปลงเล็กน้อยสำหรับทดสอบและเปิด Draft PR เข้า `dev`: งานต้องยังอยู่ `In Progress`
@@ -129,18 +129,18 @@ Tests ใช้ mock API ไม่มีการเรียก Linear จร�
 
 ## ข้อกำหนดของ workflow
 
-- รับ `pull_request_target` เฉพาะ `opened`, `reopened`, `ready_for_review`, `synchronize`, `edited`, `closed`
+- รับ `pull_request` เฉพาะ `opened`, `reopened`, `ready_for_review`, `synchronize`, `edited`, `closed`
   และ base branch `dev`
 - รันบน Ubuntu และ Node.js 24 ใช้ `fetch` ในตัว ไม่ต้องมี SDK หรือ npm dependencies
 - ให้ GitHub token เฉพาะ `contents: read` และ `pull-requests: read`
-- Checkout เฉพาะ commit ที่เชื่อถือได้จาก default branch จาก `refs/heads/main` และไม่เก็บ Git credentials
+- Linear checkout สคริปต์ที่ตรวจแล้วจาก `refs/heads/dev`; Discord checkout จาก `refs/heads/main` และไม่เก็บ Git credentials
 - ห้ามเปลี่ยน checkout ไปเป็น PR head/merge ref หรือเพิ่มขั้นตอนที่รันโค้ดจาก PR ใน job ที่มี Linear key
 - กำหนด timeout ต่อ request 15 วินาทีและทั้ง job 5 นาที ไม่ follow HTTP redirects
 - ชื่อ workspace/team/branch อยู่ในสคริปต์; หากเปลี่ยนชื่อเหล่านี้ต้องปรับสคริปต์และ workflow ให้ตรงกัน
 
 อ้างอิง: [Linear GraphQL API](https://linear.app/developers/graphql),
 [Linear GitHub integration และ automation](https://linear.app/docs/github),
-[GitHub pull_request_target](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#pull_request_target)
+[GitHub pull_request](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#pull_request)
 
 ## แจ้ง Discord เมื่อ merge เข้า main
 
@@ -158,7 +158,7 @@ Workflow **Discord main merge** ทำงานแยกจาก Linear sync �
    ไม่ส่ง URL จริงลงแชตหรือ commit ลง repo
 3. ใช้ repository secret **`LINEAR_HORN_PROD_BOOK`** เดิมเพื่ออ่านชื่อและผู้รับผิดชอบงานสำหรับข้อความ
    ไม่ต้องสร้าง Discord bot หรือ Discord bot token
-4. นำ workflow และสคริปต์ทั้งหมดเข้า `main` และสร้าง branch `dev` จาก `main` นั้นก่อนเริ่ม flow
+4. ติดตั้ง workflow และสคริปต์เข้า `dev` ก่อน ทดสอบ Linear ให้ผ่าน แล้วค่อยเปิด PR `dev → main` เมื่อพร้อมแจ้ง Discord
    คู่มือนี้ไม่ถือว่ามีการ push ไฟล์ สร้าง remote branch หรือตั้ง secrets ให้แล้ว
 
 สำหรับส่งเข้า thread สามารถใช้ webhook URL ที่มี `?thread_id=<เลข thread>` ได้
@@ -202,3 +202,5 @@ timeout อาจเกิดหลัง Discord รับข้อความ
 
 อ้างอิง: [Discord Webhook](https://docs.discord.com/developers/resources/webhook#execute-webhook),
 [GitHub Compare API](https://docs.github.com/en/rest/commits/commits#compare-two-commits)
+
+Linear ใช้ `pull_request` เพื่อทำงานบน `dev` ได้ก่อนติดตั้งใน `main` และรันเฉพาะ branch ภายใน repo ที่มี `boo-` ในชื่อ (ไม่สนตัวพิมพ์เล็กใหญ่) Job ติดตั้งที่ไม่มีรหัส BOO จะถูกข้าม สคริปต์ยังตรวจรหัสงานแบบสมบูรณ์อีกครั้ง PR ที่มี merge conflict ต้องแก้ conflict ก่อน GitHub จึงจะเรียก workflow นี้

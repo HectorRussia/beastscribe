@@ -31,7 +31,7 @@ function fixture({ action = 'opened', pr = {}, issue = {}, context = {}, respons
   const calls = [];
   const args = {
     event: { action, repository: { full_name: REPOSITORY }, pull_request: original },
-    eventName: 'pull_request_target',
+    eventName: 'pull_request',
     repository: REPOSITORY,
     githubToken: 'fake-github-token',
     linearApiKey: 'fake-linear-key',
@@ -196,7 +196,7 @@ test('PR retargeted into dev is eligible on edited', async () => {
 });
 
 for (const change of [
-  { eventName: 'push' }, { eventName: 'pull_request' },
+  { eventName: 'push' }, { eventName: 'pull_request_target' },
   { event: { action: 'converted_to_draft' } },
 ]) {
   test(`unsupported event is skipped: ${JSON.stringify(change)}`, async () => {
@@ -310,7 +310,7 @@ test('CLI reports errors, exits nonzero, and writes an Actions summary without n
         ...process.env,
         GITHUB_EVENT_PATH: eventPath,
         GITHUB_STEP_SUMMARY: summaryPath,
-        GITHUB_EVENT_NAME: 'pull_request_target',
+        GITHUB_EVENT_NAME: 'pull_request',
         GITHUB_REPOSITORY: REPOSITORY,
         GITHUB_TOKEN: '',
         LINEAR_API_KEY: 'DO-NOT-LOG',
