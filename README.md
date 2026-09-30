@@ -4,11 +4,14 @@
 
 เอกสารนี้อธิบายแนวทางและโครงสร้างโฟลเดอร์ที่ตกลงกัน เพื่อใช้เป็นพื้นฐานในการออกแบบระบบต่อไป
 
-> **สถานะปัจจุบัน: มีเฉพาะโครงสร้างโฟลเดอร์ README นี้ และไฟล์ `.gitkeep` สำหรับเก็บโฟลเดอร์ว่างใน Git**
+> **สถานะปัจจุบัน: มีโครงสร้างโฟลเดอร์ เอกสาร และ GitHub Actions สำหรับเชื่อมสถานะ Linear ทีม BOO และแจ้ง Discord**
 >
 > ยังไม่ได้เขียนโค้ด frontend, backend หรือ AI service ไม่มีการเชื่อมต่อฐานข้อมูล ไม่มีการตั้งค่า authentication, queue, storage หรือ Docker และยังไม่ได้ออกแบบรายละเอียด API หรือ database schema
 >
 > เทคโนโลยีและ flow ในเอกสารเป็นแนวทางที่เลือกไว้ ไม่ใช่ฟีเจอร์ที่ implement หรือทดสอบแล้ว
+
+Flow การทำงาน: เปิด PR เข้า `dev` → `In Review`, merge เข้า `dev` → `QA`, แล้ว merge `dev → main` ด้วย merge commit → แจ้ง Discord โดยคงสถานะ Linear เดิม
+ดู [คู่มือ Linear และ Discord](.github/LINEAR.md) สำหรับตั้ง `LINEAR_HORN_PROD_BOOK`, `DISCORD_WEBHOOK_URL` โดยติดตั้ง workflow เข้า `dev` ก่อน แล้วค่อยนำ `dev` เข้า `main` เมื่อพร้อม
 
 ## 1. แนวคิดของโปรเจกต์
 
@@ -72,7 +75,7 @@ Python ไม่อ่านคิว River โดยตรง และ fronten
 
 ## 4. โครงสร้างโฟลเดอร์ปัจจุบัน
 
-โฟลเดอร์ด้านล่างสร้างไว้แล้ว แต่ยังไม่มีไฟล์ implementation อยู่ภายใน
+โฟลเดอร์ด้านล่างสร้างไว้แล้ว ส่วนแอปและบริการยังไม่มี implementation; `.github/` มี workflow และสคริปต์เชื่อม Linear
 
 ```text
 book_fantasy/
@@ -125,7 +128,9 @@ book_fantasy/
 ├── docs/
 │   └── decisions/
 ├── .github/
-│   └── workflows/
+│   ├── workflows/
+│   ├── scripts/
+│   └── LINEAR.md
 └── README.md
 ```
 
@@ -196,7 +201,7 @@ LangChain เป็นเครื่องมือจัดกระบวน�
 | `infra/docker/` | Dockerfiles และไฟล์ประกอบการรัน container ในอนาคต |
 | `docs/` | เอกสารการออกแบบและแนวทางพัฒนา |
 | `docs/decisions/` | บันทึกการตัดสินใจด้านสถาปัตยกรรม พร้อมเหตุผลและข้อแลกเปลี่ยน |
-| `.github/workflows/` | GitHub Actions สำหรับ CI/CD เมื่อเริ่มกำหนด workflow |
+| `.github/workflows/` | GitHub Actions เชื่อมสถานะ Linear จาก PR; การตั้งค่าอยู่ใน `.github/LINEAR.md` |
 
 `contracts/` ใช้กำหนดสิ่งที่แต่ละบริการตกลงรับและส่ง ไม่ใช่ที่รวม business logic ข้ามภาษา ส่วนเอกสารใน `docs/decisions/` ควรบันทึกเฉพาะการตัดสินใจที่ตกลงแล้ว และแยกข้อเสนอที่ยังหารือออกให้ชัดเจน
 
